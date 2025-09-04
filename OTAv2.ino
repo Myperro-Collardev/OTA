@@ -10,16 +10,19 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <HardwareSerial.h>
+#include <Preferences.h>
+
+
+Preferences prefs; 
+
+
 
 // ---------------- Pins & Modem UART ----------------
 #define EC200U_RX 5
 #define EC200U_TX 6
 HardwareSerial ecSerial(1);
 
-// ---------------- Wi-Fi / Cloud ----------------
-const char* WIFI_SSID = "Sravyakonchada";
-const char* WIFI_PASS = "12345678";
-const String FIREBASE_HOST = "myperro-gps-default-rtdb.firebaseio.com";
+
 
 // ---------------- State ----------------
 bool trackingActive = false;
@@ -49,6 +52,14 @@ RTC_DATA_ATTR uint8_t rtc_state = 0; // 0=OFF(default), 1=ON
 // ---------------- Geofence / GNSS flags ----------------
 static bool gpsActive = false;
 static bool gpsHasFix = false;
+
+
+
+// ---------------- Wi-Fi / Cloud ----------------
+const char* WIFI_SSID = "SSID";
+const char* WIFI_PASS = "PWD";
+const String FIREBASE_HOST = "myperro-gps-default-rtdb.firebaseio.com";
+
 
 // ---------------- LTE sleep control ----------------
 static bool lteSleeping = false;
@@ -382,6 +393,12 @@ void setup() {
   Serial.begin(115200);
   delay(50);
 
+prefs.begin("Data", false);
+String CollarName = prefs.getString("CollarName", "FAILED!");
+String WIFI_SSID = prefs.getString("wifi_pwd", "FAILED!");
+String WIFI_PASS = prefs.getString("wifi_ssid", "FAILED!");
+prefs.end();
+
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   switch (cause) {
     case ESP_SLEEP_WAKEUP_GPIO:      Serial.println("Wake cause: GPIO"); break;
@@ -412,6 +429,7 @@ void setup() {
       rtc_state = 1;
       Serial.println("Long press detected → state=ON. Running normally.");
       setLed(true);
+      Serial.println(CollarName);
 
       ecSerial.begin(115200, SERIAL_8N1, EC200U_RX, EC200U_TX);
       delay(500);
