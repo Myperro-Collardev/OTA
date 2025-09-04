@@ -56,8 +56,8 @@ static bool gpsHasFix = false;
 
 
 // ---------------- Wi-Fi / Cloud ----------------
-const char* WIFI_SSID = "SSID";
-const char* WIFI_PASS = "PWD";
+String WIFI_SSID = "SSID";
+String WIFI_PASS = "PWD";
 const String FIREBASE_HOST = "myperro-gps-default-rtdb.firebaseio.com";
 
 
@@ -398,6 +398,11 @@ String CollarName = prefs.getString("CollarName", "FAILED!");
 String WIFI_SSID = prefs.getString("wifi_ssid", "FAILED!");
 String WIFI_PASS = prefs.getString("wifi_pwd", "FAILED!");
 prefs.end();
+WIFI_SSID.trim();
+WIFI_PASS.trim();
+
+Serial.println(WIFI_SSID);
+Serial.println(WIFI_PASS);
 
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   switch (cause) {
@@ -563,8 +568,18 @@ void loop() {
 
 // ---- Wi-Fi helpers ----
 void connectToWiFi() {
+  
+  prefs.begin("Data", false);
+  String WIFI_SSID = prefs.getString("wifi_ssid", "FAILED!");
+  String WIFI_PASS = prefs.getString("wifi_pwd", "FAILED!");
+  prefs.end();
+  Serial.print("🔌 Connecting to Wi-Fi " );
+  Serial.print(WIFI_SSID);
+  Serial.print(" with Password ");
+  Serial.println(WIFI_PASS);
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("🔌 Connecting to Wi-Fi");
+  
   for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++) {
     delay(500);
     Serial.print(".");
