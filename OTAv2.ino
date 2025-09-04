@@ -395,8 +395,8 @@ void setup() {
 
 prefs.begin("Data", false);
 String CollarName = prefs.getString("CollarName", "FAILED!");
-String WIFI_SSID = prefs.getString("wifi_pwd", "FAILED!");
-String WIFI_PASS = prefs.getString("wifi_ssid", "FAILED!");
+String WIFI_SSID = prefs.getString("wifi_ssid", "FAILED!");
+String WIFI_PASS = prefs.getString("wifi_pwd", "FAILED!");
 prefs.end();
 
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
