@@ -73,7 +73,7 @@ class BleSerialTee : public Print {
   public:
     // Forwarders for Serial control and input
     void begin(unsigned long baud) { ::Serial.begin(baud); }
-    void begin(unsigned long baud, uint32_t config) { ::Serial.begin(baud, config); }
+    //void begin(unsigned long baud, uint32_t config) { ::Serial.begin(baud, config); }
     void end() { ::Serial.end(); }
     int available() { return ::Serial.available(); }
     int read() { return ::Serial.read(); }
@@ -668,3 +668,4 @@ String sendAT(const String &cmd, uint32_t timeout) {
   Serial.printf("🔁 %s\n%s\n", cmd.c_str(), resp.c_str());
   return resp;
 }
+
