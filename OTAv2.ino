@@ -484,7 +484,7 @@ Serial.println(WIFI_PASS);
 
 // ---- Loop ----
 void loop() {
-  delay(100);
+  
 
   if (deviceConnected && Serial.available()) {
     String input = Serial.readStringUntil('\n');
@@ -500,6 +500,7 @@ void loop() {
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
   }
+  connectToWiFi();
 
   int rssi = getWiFiRSSI();
   Serial.printf("📶 RSSI: %d dBm\n", rssi);
@@ -668,4 +669,5 @@ String sendAT(const String &cmd, uint32_t timeout) {
   Serial.printf("🔁 %s\n%s\n", cmd.c_str(), resp.c_str());
   return resp;
 }
+
 
