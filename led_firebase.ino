@@ -272,9 +272,23 @@ static inline bool buttonIsPressed() {
 #define NUM_LEDS 1
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+// Track current LED for Firebase
+static uint8_t gLED_R = 0, gLED_G = 0, gLED_B = 0;
+static String  gLED_Name = "off";
+
+static const char* colorNameFromRGB(uint8_t r, uint8_t g, uint8_t b) {
+  if (r==255 && g==100 && b==0)   return "orange";
+  if (r==255 && g==0   && b==0)   return "red";
+  if (r==0   && g==255 && b==0)   return "green";
+  if (r==0   && g==0   && b==0)   return "off";
+  return "custom";
+}
+
 static void rgbSet(uint8_t r, uint8_t g, uint8_t b) {
   strip.setPixelColor(0, strip.Color(r, g, b));
   strip.show();
+  gLED_R = r; gLED_G = g; gLED_B = b;
+  gLED_Name = colorNameFromRGB(r,g,b);
 }
 static void rgbOff() { rgbSet(0,0,0); }
 
@@ -391,8 +405,8 @@ INA226 INA(0x40);
 
 // ---- Linear SOC map (2S) ----
 static float mapVoltageToSOC(float vPack) {
-  const float V_FULL  = 7.6f;  // 4.20V/cell
-  const float V_EMPTY = 5.40f;  // ~3.40V/cell (under load)
+  const float V_FULL  = 8.40f;  
+  const float V_EMPTY = 4.50f;
   float soc = 100.0f * (vPack - V_EMPTY) / (V_FULL - V_EMPTY);
   if (soc < 0.0f)   soc = 0.0f;
   if (soc > 100.0f) soc = 100.0f;
@@ -409,50 +423,52 @@ static float emaSOC(float soc) {
   return s;
 }
 
+// ===== Charging detection config (with hysteresis) =====
+static const float CHG_POLARITY     = +1.0f; // set -1.0f if your INA226 returns NEGATIVE while charging
+static const float CHG_CURR_ON_mA   = 80.0f; // current above this → charging = true
+static const float CHG_CURR_OFF_mA  = 20.0f; // current below this → charging = false
+static const float V_FULL_EPS       = 0.02f; // 20 mV tolerance around full
+
 // Battery sampling & reporting
 static uint32_t lastBatSampleMs = 0;
 static uint32_t lastBatReportMs = 0;
 static const uint32_t kBatSampleIntervalMs = 5000;     // sample every 5s
-static const uint32_t kBatReportIntervalMs = 15000;   // report every 10 min
+static const uint32_t kBatReportIntervalMs = 600000;    // your current test cadence
 static float socAccum = 0.0f, vAccum = 0.0f;
 static uint32_t socCount = 0;
 
-// ==== Charging detect flag (forces Red while charging) ====
+// ==== Charging detect flag (forces Red while charging unless full & tapered) ====
 static bool gIsCharging = false;
 
-// ===== Four-color cycling palette for % drops =====
-// Order cycles every 4%: e.g., 60→Blue, 59→Cyan, 58→Magenta, 57→White, then repeats.
-static const uint8_t kPalette[4][3] = {
-  {  0,   0, 255},  // Blue
-  {  0, 255, 255},  // Cyan
-  {255,   0, 255},  // Magenta
-  {255, 255, 255}   // White
-};
+// ===== LED logic (NO 4-color per-percent cycling) =====
+static void updateBatteryLed(float socSmooth, float vPack, float chgCurrent_mA) {
+  const bool fullNow     = (vPack >= (8.40f - V_FULL_EPS));
+  const bool taperedNow  = (chgCurrent_mA < CHG_CURR_OFF_mA);
 
-// LED logic for battery/charge state
-static void updateBatteryLed(float socSmooth, float vPack) {
-  if (gIsCharging) {               // Charging → Red
+  // Full & tapered → GREEN
+  if (fullNow && taperedNow) {
+    rgbSet(0, 255, 0);
+    return;
+  }
+
+  // Charging → RED
+  if (gIsCharging) {
     rgbSet(255, 0, 0);
     return;
   }
-  if (socSmooth <= 0.0f) {         // sensor error or dead → Red
+
+  if (socSmooth <= 0.0f) {  // error/dead
     rgbSet(255, 0, 0);
     return;
   }
-  if (socSmooth < 20.0f) {         // Low Battery → Red
+  if (socSmooth < 20.0f) {  // Low battery → RED
     rgbSet(255, 0, 0);
     Serial.println("🔋 LOW BATTERY");
     return;
   }
-  if (socSmooth >= 99.0f || vPack >= 7.6f) {
-    rgbSet(0, 255, 0);             // Full Charged → Green
-    return;
-  }
 
-  // Normal running: cycle colors in groups of 4% (…60,59,58,57)
-  int socInt = (int)floorf(socSmooth);
-  int idx = ((socInt % 4) + 4) % 4;    // safe modulo
-  rgbSet(kPalette[idx][0], kPalette[idx][1], kPalette[idx][2]);
+  // Normal run → steady ORANGE
+  rgbSet(255, 100, 0);
 }
 
 // Ensure LTE context is up for HTTP posts
@@ -468,7 +484,7 @@ static void ensureLTEUpForHTTP() {
   sendAT("AT+QIACT=1", 1000);
 }
 
-// Send battery JSON via LTE HTTP to /Bat
+// Send battery JSON via LTE HTTP to /Bat  (includes LED state)
 static void sendBatteryToFirebaseLTE(float avgSOC, float avgV) {
   ensureLTEUpForHTTP();
 
@@ -477,10 +493,16 @@ static void sendBatteryToFirebaseLTE(float avgSOC, float avgV) {
   doc["soc"] = (int)roundf(avgSOC);
   doc["voltage"] = avgV;
 
+  // Include current LED color
+  JsonObject led = doc.createNestedObject("led");
+  led["name"] = gLED_Name;
+  led["r"] = gLED_R;
+  led["g"] = gLED_G;
+  led["b"] = gLED_B;
+
   String payload;
   serializeJson(doc, payload);
 
-  // Configure HTTP for Firebase Bat path
   sendAT("AT+QHTTPCFG=\"contextid\",1", 200);
   sendAT("AT+QHTTPCFG=\"requestheader\",0", 200);
   sendAT("AT+QHTTPCFG=\"sslctxid\",1", 200);
@@ -501,7 +523,7 @@ static void sendBatteryToFirebaseLTE(float avgSOC, float avgV) {
   while (ecSerial.available()) Serial.write(ecSerial.read());
 }
 
-// Read battery once (voltage→SOC), accumulate & LED update
+// Read battery once (voltage→SOC), update charging state (with hysteresis), LED, and accumulators
 static void sampleBatteryAndAccumulate() {
   float v = INA.getBusVoltage();     // Pack voltage (V)
   if (v <= 0.01f) {
@@ -509,13 +531,19 @@ static void sampleBatteryAndAccumulate() {
     return;
   }
 
-  // Detect charging using current (orientation-dependent; adjust sign/threshold if needed)
-  float i_mA = INA.getCurrent_mA();
-  gIsCharging = (i_mA > 50.0f);   // charging if current into battery is > ~50mA
+  // Charging detection with polarity & hysteresis
+  float i_mA_raw = INA.getCurrent_mA();
+  float i_mA_chg = CHG_POLARITY * i_mA_raw; // >0 means charging (after polarity adj)
+
+  if (!gIsCharging) {
+    if (i_mA_chg > CHG_CURR_ON_mA) gIsCharging = true;
+  } else {
+    if (i_mA_chg < CHG_CURR_OFF_mA) gIsCharging = false;
+  }
 
   float socRaw    = mapVoltageToSOC(v);
-  float socSmooth = emaSOC(socRaw);      // use smoothed for UI/LED
-  updateBatteryLed(socSmooth, v);
+  float socSmooth = emaSOC(socRaw);  // smoothed for LED/UI
+  updateBatteryLed(socSmooth, v, i_mA_chg);
 
   // For reporting, average raw samples over the window
   socAccum += socRaw;
@@ -677,7 +705,7 @@ void loop() {
     sampleBatteryAndAccumulate();
   }
 
-  // ====== Battery report every 10 minutes via LTE → Firebase /Bat ======
+  // ====== Battery report (with LED color) to Firebase via LTE ======
   if (now - lastBatReportMs >= kBatReportIntervalMs) {
     lastBatReportMs = now;
     if (socCount > 0) {
@@ -712,7 +740,7 @@ void loop() {
       String latDD = convertToDecimal(latRaw);
       String lonDD = convertToDecimal(lonRaw);
       Serial.printf("🕒 Fix Time: %s | 📍 Lat: %s | Lon: %s\n", fixTime.c_str(), latDD.c_str(), lonDD.c_str());
-      // NOTE: No location payload sent to Firebase here.
+      // No Firebase location payload
     } else {
       Serial.println("❌ No GPS fix.");
       gpsHasFix = false;
